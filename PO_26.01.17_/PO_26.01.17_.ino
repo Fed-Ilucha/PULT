@@ -9,6 +9,9 @@
 #define TFT_DC 9
 #define TFT_CS 10
 #define MAIN_BCGRND 0xEF9D
+#define RED 0xF800
+#define WHITE 0x0000
+#define BLACK 0xFFFF
 
 #define UP_BUTTON 8
 #define DOWN_BUTTON 7
@@ -28,6 +31,7 @@ int displacement_first = 0;
 int displacement_second = 0;
 int strenght_first = 0;
 int strenght_second = 0;
+int buf = 0;
 
 long displacement_long = 0;
 long speed_long = 0;
@@ -43,6 +47,8 @@ unsigned long timer = 0;
 union Pun {float f; uint32_t u;};
 
 uint16_t au16data[16] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+int data[16] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+
 Modbus slave(2,0,2);
 Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC);
 
@@ -105,6 +111,11 @@ void setup() {
 
 void loop() {
   slave.poll( au16data, 16 );
+
+  for(int i=0; i<16; i++){
+    data[i] = au16data[i];
+  }
+  
   boolean UP_changed = UP.update();
   boolean DOWN_changed = DOWN.update();
   boolean SPEED_UP_changed = SPEED_UP.update();
@@ -112,42 +123,38 @@ void loop() {
   
   if (UP_changed){                                              //если изменено состояние кнопки "вверх"
       if(UP.read()==HIGH){                                         //если она нажата
-          tft.fillTriangle(200,41,228,84,172,84,ILI9341_RED);
-          tft.fillRect(189,85,22,59,ILI9341_RED);
-          au16data[2]=1;
+          fill_upper_tri(RED);
+          bitSet(data[0],2);
       }
   else{                                                            //если отпущена
-          tft.fillTriangle(200,41,228,84,172,84,0xFFFF); 
-          tft.fillRect(189,85,22,59,0xFFFF); 
-          au16data[2]=0;
+          fill_upper_tri(WHITE);
+          bitClear(data[0],2);
       }
   }
   if (DOWN_changed){                                            //если изменено состояние кнопки "вниз"
     if(DOWN.read()==HIGH){                                          //если она нажата
-        tft.fillTriangle(200,278,228,236,172,236,ILI9341_RED); 
-        tft.fillRect(189,177,22,59,ILI9341_RED); 
-        au16data[3]=1;
+        fill_down_tri(RED);
+        bitSet(data[0],3);
     }
     else{                                                           //если она отпущена
-        tft.fillTriangle(200,278,228,236,172,236,0xFFFF); 
-        tft.fillRect(189,177,22,59,0xFFFF); 
-        au16data[3]=0;
+        fill_down_tri(WHITE);
+        bitClear(data[0],3);
     }
   }
   if (SPEED_UP_changed){                                        //если изменено состояние кнопки "увеличить скорость"
     if (SPEED_UP.read() == HIGH){                                   //если она нажата
-      au16data[0] = 1;
+       bitSet(data[1],0);
     }
     else{
-      au16data[0] = 0;
+       bitClear(data[1],0);
     }
   }
   if (SPEED_DOWN_changed){                                      //если изменено состояние кнопки "уменшить скорость"
     if (SPEED_DOWN.read() == HIGH){                                  //если она нажата
-      au16data[1] = 1;
+       bitSet(data[1],1);
     }
     else{
-      au16data[1] = 0;
+      bitClear(data[1],1);
     }
   }
   if (strenght_changed()){                                      // если изменилось значение силы
@@ -163,8 +170,28 @@ void loop() {
   if (speed_changed_from_PLC()){                              // если с контроллера пришло новое значение скорости
     speed_update();
   }
+  
+  if(changed_moving_from_PLC()){
+    if ( (data[1] & 0x01)==1 ) {fill_upper_tri(RED);}
+    else {fill_upper_tri(WHITE);}
+    
+    if ( ( (data[1] >> 1) & 0x01 )==1 ){ fill_down_tri(RED);}
+    else {fill_down_tri(WHITE);}
+  }
 }
 
+int fill_upper_tri(int color){
+  tft.fillTriangle(200,41,228,84,172,84,color);
+  tft.fillRect(189,85,22,59, color);
+}
+
+int fill_down_tri(int color){
+  tft.fillTriangle(200,278,228,236,172,236,color); 
+  tft.fillRect(189,177,22,59,color); 
+}
+
+          
+          
 void speed_update(){                                            // обновление показаний скорости
     speed_float = float(speed_long)/10000;                             
     fill_value = map(constrain(speed_float,0,500), 0,500 , 0, 148);   //расчет для красного ползунка
@@ -176,10 +203,10 @@ void speed_update(){                                            // обновл�
 }
 
 boolean strenght_changed(){                                     // проверка на изменение показаний силы
-  if (strenght_first!=au16data[8]||strenght_second!=au16data[9]){   // проверка на изменение каждой ячейки
-    strenght_second = au16data[9];
-    strenght_first = au16data[8];
-    strenght_float = decodeFloat(&au16data[8]);                          // раскодировка во float из 2 16 битных ячеек
+  if (strenght_first!=au16data[6]||strenght_second!=au16data[7]){   // проверка на изменение каждой ячейки
+    strenght_second = au16data[7];
+    strenght_first = au16data[6];
+    strenght_float = decodeFloat(&au16data[6]);                          // раскодировка во float из 2 16 битных ячеек
     return true;
   }
   else{                                                              // если не изменилось возвр false
@@ -188,10 +215,10 @@ boolean strenght_changed(){                                     // провер�
 }
 
 boolean displacement_changed(){                                 // проверка на изменение показаний перемещения
-   if (displacement_first != au16data[4] || displacement_second != au16data[5]){    // проверка на изменение каждой ячейки
-       displacement_first = au16data[4];                                            
-       displacement_second = au16data[5];
-       displacement_long = decodeLong(&au16data[4]);                                // раскодировка в long из 2 16 битных ячеек
+   if (displacement_first != au16data[2] || displacement_second != au16data[3]){    // проверка на изменение каждой ячейки
+       displacement_first = au16data[2];                                            
+       displacement_second = au16data[3];
+       displacement_long = decodeLong(&au16data[2]);                                // раскодировка в long из 2 16 битных ячеек
        displacement_float = float(displacement_long)/10000;                               // преобразование в формат 00.0000
        return true;
     }
@@ -200,7 +227,7 @@ boolean displacement_changed(){                                 // провер�
   }
  }
  boolean speed_changed_from_PLC(){                             // проверка на изменение скорости от контроллера
-    speed_long_buf = decodeLong(&au16data[6]);
+    speed_long_buf = decodeLong(&au16data[4]);
     if(speed_long_buf != speed_long){
       speed_long = speed_long_buf;
       return true;
@@ -209,7 +236,14 @@ boolean displacement_changed(){                                 // провер�
       return false;
     }
 }
-  
+
+ boolean changed_moving_from_PLC(){
+   if ( buf != data[1]){
+    buf = data[1];
+    return true;
+   }
+   else {return false;}
+ }
  
  float decodeFloat(const uint16_t *regs){                         //раскодировка во float  из 2 16 битных ячеек
     union Pun pun;
